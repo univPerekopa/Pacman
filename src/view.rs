@@ -226,7 +226,7 @@ impl View {
             Image::new()
                 .rect(offset(self.entity_sq(ghost.x(), ghost.y())))
                 .draw(
-                    pick_color(&self.ghost_textures[i]),
+                    pick_color(&self.ghost_textures[i % 4]),
                     &c.draw_state,
                     c.transform,
                     g,

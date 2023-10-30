@@ -1,3 +1,5 @@
+use std::collections::BTreeSet;
+use crate::pacman::map::{MAP_HEIGHT, MAP_WIDTH};
 use super::map::{self, Map};
 use super::Direction;
 
@@ -5,6 +7,7 @@ const BLINKY_HOME: (i32, i32) = (map::MAP_WIDTH as i32 - 3, -2);
 const PINKY_HOME: (i32, i32) = (2, -2);
 const INKY_HOME: (i32, i32) = (map::MAP_WIDTH as i32 - 1, map::MAP_HEIGHT as i32);
 const CLYDE_HOME: (i32, i32) = (0, map::MAP_HEIGHT as i32);
+const ASTAR_HOME: (i32, i32) = (0, map::MAP_HEIGHT as i32);
 const FRIGHTNED_TIMER: u16 = 30;
 const GHOST_MODE_TIMER: u16 = 7 * 4;
 
@@ -21,6 +24,7 @@ pub enum Name {
     Pinky,
     Inky,
     Clyde,
+    AStar
 }
 
 pub enum Interaction {
@@ -29,7 +33,7 @@ pub enum Interaction {
 }
 
 pub struct Ghosts {
-    ghosts: [Ghost; 4],
+    pub(crate) ghosts: Vec<Ghost>,
     ghost_mode: GhostMode,
     mode_timer: u16,
     frightened_timer: u16,
@@ -39,11 +43,12 @@ pub struct Ghosts {
 impl Ghosts {
     pub fn new() -> Self {
         Ghosts {
-            ghosts: [
-                Ghost::new(Name::Blinky),
+            ghosts: vec![
                 Ghost::new(Name::Pinky),
-                Ghost::new(Name::Inky),
-                Ghost::new(Name::Clyde),
+                // Ghost::new(Name::Pinky),
+                // Ghost::new(Name::Inky),
+                // Ghost::new(Name::Clyde),
+                Ghost::new(Name::AStar),
             ],
             ghost_mode: GhostMode::Chase,
             mode_timer: 0,
@@ -81,15 +86,17 @@ impl Ghosts {
                         Name::Pinky => calc_pinky_target(player),
                         Name::Inky => calc_inky_target(blinky, player),
                         Name::Clyde => calc_clyde_target(ghst.pos, plr),
+                        Name::AStar => calc_a_star_target(map, ghst.pos, plr),
                     };
                     ghst.move_to(map, target);
                 }
                 GhostMode::Scatter => {
                     let target = match ghst.name {
                         Name::Blinky => BLINKY_HOME,
-                        Name::Pinky => PINKY_HOME,
+                        Name::Pinky => calc_pinky_target(player),
                         Name::Inky => INKY_HOME,
                         Name::Clyde => CLYDE_HOME,
+                        Name::AStar => calc_a_star_target(map, ghst.pos, plr),
                     };
                     ghst.move_to(map, target);
                 }
@@ -161,6 +168,7 @@ impl Ghost {
             Name::Pinky => (15, 14),
             Name::Inky => (14, 15),
             Name::Clyde => (14, 14),
+            Name::AStar => (14, 16),
         };
         Ghost {
             pos: start_p,
@@ -170,6 +178,7 @@ impl Ghost {
                 Name::Pinky => 10,
                 Name::Inky => 20,
                 Name::Clyde => 30,
+                Name::AStar => 0,
             },
             name,
         }
@@ -235,25 +244,7 @@ impl Ghost {
     }
 
     fn get_options(&self) -> Vec<(i32, i32)> {
-        let wrap = |x| {
-            if x < 0 {
-                map::MAP_WIDTH as i32 - 1
-            } else if x == map::MAP_WIDTH as i32 {
-                0
-            } else {
-                x
-            }
-        };
-        vec![
-            (self.pos.0 + 1, self.pos.1),
-            (self.pos.0 - 1, self.pos.1),
-            (self.pos.0, self.pos.1 + 1),
-            (self.pos.0, self.pos.1 - 1),
-        ]
-        .iter()
-        .cloned()
-        .map(|(x, y)| (wrap(x), y))
-        .collect()
+        get_options(self.pos).into_iter().map(|(_, x)| x).collect()
     }
 }
 
@@ -279,6 +270,73 @@ fn calc_clyde_target(clyde: (i32, i32), plr: (i32, i32)) -> (i32, i32) {
     } else {
         plr
     }
+}
+
+fn calc_a_star_target(map: &Map, from: (i32, i32), player: (i32, i32)) -> (i32, i32) {
+    let mut queue = BTreeSet::new();
+    queue.insert((0, from));
+
+    let mut result: [[Option<(i32, Option<Direction>)>; MAP_HEIGHT]; MAP_WIDTH] = [[None; MAP_HEIGHT]; MAP_WIDTH];
+    result[from.0 as usize][from.1 as usize] = Some((0, None));
+
+    loop {
+        if let Some((_, pos)) = queue.pop_first() {
+            if pos == player {
+                break;
+            }
+
+            let options = get_options(pos);
+            let tmp = result[pos.0 as usize][pos.1 as usize].unwrap();
+            let g = tmp.0 + 1;
+
+            for (dir, to) in options {
+                if map.is_wall(to.0, to.1) {
+                    continue;
+                }
+
+                let h = (to.0 - player.0).abs() + (to.1 - player.1).abs();
+                let f = g + h;
+
+                let to_update = match result[to.0 as usize][to.1 as usize] {
+                    Some((saved_f, _)) => f < saved_f,
+                    None => true
+                };
+
+                if to_update {
+                    queue.insert((f, to));
+                    result[to.0 as usize][to.1 as usize] = Some((f, Some(tmp.1.unwrap_or(dir))));
+                }
+            }
+        } else {
+            break;
+        }
+    }
+
+    let dir = result[player.0 as usize][player.1 as usize].unwrap().1.unwrap_or(Direction::Up);
+    let v = dir.to_vector();
+    (from.0 + v.0, from.1 + v.1)
+}
+
+fn get_options(pos: (i32, i32)) -> Vec<(Direction, (i32, i32))> {
+    let wrap = |x| {
+        if x < 0 {
+            map::MAP_WIDTH as i32 - 1
+        } else if x == map::MAP_WIDTH as i32 {
+            0
+        } else {
+            x
+        }
+    };
+    vec![
+        (Direction::Right, (pos.0 + 1, pos.1)),
+        (Direction::Left, (pos.0 - 1, pos.1)),
+        (Direction::Down, (pos.0, pos.1 + 1)),
+        (Direction::Up, (pos.0, pos.1 - 1)),
+    ]
+        .iter()
+        .cloned()
+        .map(|(dir, (x, y))| (dir, (wrap(x), y)))
+        .collect()
 }
 
 // DEBUG VIEWS

@@ -52,7 +52,7 @@ fn pellet_coords() -> Vec<(usize, usize)> {
 }
 
 pub struct Map {
-    tiles: [Tile; (MAP_WIDTH * MAP_HEIGHT) as usize],
+    pub tiles: [Tile; (MAP_WIDTH * MAP_HEIGHT) as usize],
     pellets: u32,
     pellet_coords: Vec<(usize, usize)>,
 }
